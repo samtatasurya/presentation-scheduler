@@ -1,0 +1,191 @@
+<!-- https://stackoverflow.com/a/24050434/4879957 -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/sunny/jquery-ui.css">
+  <script src="https://code.jquery.com/jquery-1.12.4.min.js" integrity="sha256-ZosEbRLbNQzLpnKIkEdrPv7lOy9C27hHQ+Xp8a4MxAQ=" crossorigin="anonymous"></script>
+  <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js" integrity="sha256-VazP97ZCwtekAsvgPBSUwPFKdrwD3unUfSGVYrahUqU=" crossorigin="anonymous"></script>
+  <style>
+    #theSortableStuff { list-style-type: none; margin: 0; padding: 0; width: 30%; float: left; }
+    #theSortableStuff li { margin: 0 3px 3px 3px; padding: 0.4em; padding-left: 1.5em; font-size: 1.4em; height: 18px; }
+    #theSortableStuff li span { position: absolute; margin-left: -1.3em; }
+    #theDateStuff { list-style-type: none; margin: 0; padding: 0; width: 50%; float: left; }
+    #theDateStuff li .dateShow { margin: 0 3px 3px 3px; padding: 0.4em; padding-left: 1.5em; font-size: 1.4em; height: 18px; width: 50%; }
+    .sortIcon { display: none }
+    .dateShow { display: inline-block }
+    .dateEdit { display: none }
+    #saveButton { display: none }
+    #cancelButton { display: none }
+    .action { clear:both }
+  </style>
+  <script type="text/javascript">
+    $(function(){
+      // Called when "Edit" button is clicked.
+      var startEdit = function() {
+        $editBtn.hide();
+        $sortables.sortable("enable");
+        $(".sortIcon").show();
+        $(".dateEdit").show();
+        $saveBtn.show();
+        $cancelBtn.show();
+      };
+      // Called when "Save" / "Cancel" button is clicked.
+      var finishEdit = function() {
+        $sortables.sortable("disable");
+        $(".sortIcon").hide();
+        $(".dateEdit").hide();
+        $(".datepick").val("");
+        $saveBtn.hide();
+        $cancelBtn.hide();
+        $editBtn.show();
+      };
+
+      var originalDates = [];
+      // Clear the stored original dates.
+      var clearDates = function() {
+        originalDates = [];
+      };
+      // Store the original dates when edit is started.
+      var storeDates = function() {
+        clearDates();
+        $(".dateShow").each(function() {
+          var readableDate = $(this).text();
+          originalDates.push(readableDate);
+        });
+      };
+      // Restore the original dates when edit is cancelled.
+      var restoreDates = function() {
+        var idx = 0;
+        $(".dateShow").each(function() {
+          var readableDate = originalDates[idx];
+          $(this).text(readableDate);
+          idx++;
+        });
+        clearDates();
+      };
+      // Set default date for datepicker based on the latest readable date.
+      var setDefaultDates = function() {
+        $(".dateShow").each(function() {
+          var dateText = $.datepicker.parseDate("D, M d, yy", $(this).text());
+          $(this).siblings(".dateEdit").children(".datepick").datepicker("setDate", dateText);
+        });
+      };
+      // Take a Date object and update the text in field.
+      var setReadableDate = function(date, field) {
+        var readableDate = $.datepicker.formatDate("D, M d, yy", date);
+        field.text(readableDate);
+      };
+
+      var userLayout = "";
+      // Store user layout when edit is started.
+      var storeUserLayout = function() {
+        userLayout = $sortables.html();
+      };
+      // Store user layout when edit is cancelled.
+      var restoreUserLayout = function() {
+        $sortables.html(userLayout);
+        $sortables.sortable("refreshPositions");
+      };
+
+      var orderedUsers = [];
+      // Store the order of users.
+      var storeUserOrder = function() {
+        orderedUsers = $sortables.sortable("toArray");
+      };
+      // Send a POST request to backend with updated schedule.
+      var saveSchedule = function(success_cb, error_cb) {
+        var orderedDates = [];
+        $(".datepick").each(function() {
+          var inputDate = $(this).val();
+          orderedDates.push(inputDate);
+        });
+        $.post({
+          url: "{{ url_for('update_schedule') }}",
+          data: JSON.stringify({users: orderedUsers, dates: orderedDates}),
+          success: success_cb,
+          error: error_cb,
+          contentType: "application/json",
+          dataType: "json"
+        });
+      };
+
+      var $sortables = $("#theSortableStuff").sortable({
+        disabled: true,
+        update: storeUserOrder
+      });
+      $(".datepick").each(function(){
+        $(this).datepicker({
+          showOn: "button",
+          buttonText: "Select date",
+          onSelect: function(dateText, inst) {
+            var rawDate = new Date(dateText);
+            setReadableDate(rawDate, $(this).parent().siblings(".dateShow"));
+          }
+        });
+      });
+      var $shiftBtn = $(".shifter").button({
+        icons: { primary: "ui-icon-arrowthick-1-s" }
+      });
+      $shiftBtn.click(function(event) {
+        var dpObj = $(this).siblings(".datepick");
+        while (dpObj.length) {
+          var rawDate = dpObj.datepicker("getDate");
+          rawDate.setDate(rawDate.getDate() + 7);  // add 1 week (7 days)
+          dpObj.datepicker("setDate", rawDate);
+          setReadableDate(rawDate, dpObj.parent().siblings(".dateShow"));
+          dpObj = dpObj.closest("li").next().find(".datepick");
+        }
+      });
+
+      var $editBtn = $("#editButton").button();
+      var $saveBtn = $("#saveButton").button();
+      var $cancelBtn = $("#cancelButton").button();
+      $editBtn.click(function(event) {
+        storeUserOrder();
+        storeUserLayout();
+        storeDates();
+        setDefaultDates();
+        startEdit();
+      });
+      $saveBtn.click(function(event) {
+        var successCallback = function() { alert("Schedule saved!"); };
+        var errorCallback = function() { alert("Error in saving schedule."); };
+        saveSchedule(successCallback, errorCallback);
+        finishEdit();
+        clearDates();
+      });
+      $cancelBtn.click(function(event) {
+        finishEdit();
+        restoreDates();
+        restoreUserLayout();
+      });
+    });
+  </script>
+</head>
+<body>
+  <div class="schedule">
+    <ul id="theSortableStuff">
+      {% for usr in users %}
+      <li id="{{ 'user-'~usr['id'] }}" class="ui-state-default"><span class="sortIcon ui-icon ui-icon-arrowthick-2-n-s"></span>{{ usr['name'] }}</li>
+      {% endfor %}
+    </ul>
+    <ul id="theDateStuff">
+      {% for date in dates %}
+      <li id="{{ 'date-'~loop.index }}">
+        <span class="dateShow">{{ date|date_format }}</span>
+        <span class="dateEdit">
+          <input type="hidden" class="datepick">
+          <button class="shifter">+7</button>
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="action">
+    <button id="editButton">Edit</button>
+    <button id="saveButton">Save</button>
+    <button id="cancelButton">Cancel</button>
+  </div>
+</body>
+</html>
