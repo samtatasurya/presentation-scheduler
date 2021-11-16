@@ -1,0 +1,27 @@
+steps:
+  - id: "build image"
+    name: "gcr.io/cloud-builders/docker"
+    args: ["build", "-t", "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}", "."]
+
+  - id: "push image"
+    name: "gcr.io/cloud-builders/docker"
+    args: ["push", "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}"]
+
+  - id: "apply migrations"
+    name: "gcr.io/google-appengine/exec-wrapper"
+    args: [
+      "-i",
+      "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}",
+      "-s",
+      "${PROJECT_ID}:${_REGION}:${_INSTANCE_NAME}",
+      "-e",
+      "SETTINGS_NAME=${_SECRET_SETTINGS_NAME}",
+      "--", "piccolo", "migrations", "forwards", "schedule"
+    ]
+
+substitutions:
+  _SECRET_SETTINGS_NAME: fastapi_settings
+  _SERVICE_NAME: schedule-service
+
+images:
+  - "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}"
