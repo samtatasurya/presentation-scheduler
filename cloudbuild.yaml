@@ -13,25 +13,17 @@ steps:
       "-i",
       "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}",
       "-s",
-      "${PROJECT_ID}:$$DB_REGION:$$DB_INSTANCE_NAME",
+      "${PROJECT_ID}:${_REGION}:${_INSTANCE_NAME}",
       "-e",
       "SETTINGS_NAME=${_SECRET_SETTINGS_NAME}",
       "--", "piccolo", "migrations", "forwards", "schedule"
     ]
-    secretEnv: ["DB_REGION", "DB_INSTANCE_NAME"]
 
 images:
   - "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}"
 
-availableSecrets:
-  secretManager:
-  - versionName: projects/${PROJECT_ID}/secrets/${_SECRET_DB_REG_NAME}/versions/latest
-    env: DB_REGION
-  - versionName: projects/${PROJECT_ID}/secrets/${_SECRET_DB_INS_NAME}/versions/latest
-    env: DB_INSTANCE_NAME
-
 substitutions:
-  _SECRET_DB_INS_NAME: sql_instance_id
-  _SECRET_DB_REG_NAME: sql_region_name
+  _INSTANCE_NAME: personal-project
+  _REGION: us-west1
   _SECRET_SETTINGS_NAME: fastapi_settings
   _SERVICE_NAME: schedule-service
