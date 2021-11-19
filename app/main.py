@@ -152,6 +152,31 @@ async def update_schedule(sched: Schedule):
     return {"count": len(sched.users)}
 
 
+@app.put("/schedule", status_code=status.HTTP_202_ACCEPTED,
+         dependencies=[Depends(verify_credentials)])
+async def rotate_schedule():
+    """ Rotate dates that are older than current date. """
+    old_schedules = await ScheduleTable.select(
+        ScheduleTable.id, ScheduleTable.date).where(
+        ScheduleTable.date < date.today()).order_by(
+        ScheduleTable.date).run()
+    if old_schedules is None:
+        return {"count": 0}
+
+    resp = await ScheduleTable.select(
+        Max(ScheduleTable.date)).first().run()
+    ref_date = resp["max"]
+
+    # Atomic (all-or-nothing) updates
+    async with ScheduleTable._meta.db.transaction():
+        for sched in old_schedules:
+            ref_date += timedelta(days=7)
+            await ScheduleTable.update({
+                    ScheduleTable.date: ref_date
+                }).where(ScheduleTable.id == sched["id"]).run()
+    return {"count": len(old_schedules)}
+
+
 @app.post("/users", status_code=status.HTTP_201_CREATED,
           dependencies=[Depends(verify_credentials)])
 async def create_user(new_user: NewUser):
