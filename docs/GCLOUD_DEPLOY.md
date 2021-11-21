@@ -32,10 +32,11 @@ postgres:///<DB_NAME>?host=/cloudsql/<PROJECT_ID>:<REGION>:<INSTANCE_NAME>/.s.PG
 ```
 3. In `cloudbuild.yaml`, modify the "substitutions" values to match your own values.
 ```
-_INSTANCE_NAME: <cloudsql-instance-name>
-_REGION: <your-target-region>
-_SECRET_SETTINGS_NAME: <secret-name-in-secret-manager>
-_SERVICE_NAME: <your-service-name>
+substitutions:
+  _INSTANCE_NAME: <cloudsql-instance-name>
+  _REGION: <your-target-region>
+  _SECRET_SETTINGS_NAME: <secret-name-in-secret-manager>
+  _SERVICE_NAME: <your-service-name>
 ```
 
 ## Commands
