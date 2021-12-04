@@ -20,6 +20,7 @@ It follows the [Django on Cloud Run](https://cloud.google.com/python/django/run)
 API_USER=<plain_username>
 API_HASHED_PASSWORD=<hashed_password>
 DB_URL=<database_url>
+DB_MAX_POOL_SIZE=<max_size>
 ```
 - `plain_username`
   - Username (plain string) to be used in accessing some API routes.
@@ -30,6 +31,9 @@ DB_URL=<database_url>
 ```
 postgres:///<DB_NAME>?host=/cloudsql/<PROJECT_ID>:<REGION>:<INSTANCE_NAME>/.s.PGSQL.5432&user=<DB_USER>&password=<DB_PASS>
 ```
+- `max_size`
+  - Maximum number of database connections in the pool.
+  - Cloud SQL has [limits](https://cloud.google.com/sql/docs/postgres/quotas#fixed-limits) depending on the machine type.
 3. In `cloudbuild.yaml`, modify the "substitutions" values to match your own values.
 ```
 substitutions:

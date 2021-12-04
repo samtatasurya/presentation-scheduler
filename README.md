@@ -30,6 +30,7 @@ $ source ./venv/bin/activate
 API_USER=<plain_username>
 API_HASHED_PASSWORD=<hashed_password>
 DB_URL=<database_url>
+DB_MAX_POOL_SIZE=<max_size>
 ```
 - `plain_username`
   - Username (plain string) to be used in accessing some API routes.
@@ -47,6 +48,10 @@ DB_URL=<database_url>
 ```
 postgres://[user[:password]@][host][:port][/dbname]
 ```
+- `max_size`
+  - Maximum number of database connections in the pool.
+  - [Piccolo](https://piccolo-orm.readthedocs.io/en/latest/piccolo/engines/postgres_engine.html#id1)
+  - [asyncpg](https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools)
 3. Perform database migration.
 ```
 (venv) $ piccolo migrations forwards schedule

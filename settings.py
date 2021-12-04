@@ -30,3 +30,4 @@ else:
 API_USER = config("API_USER")
 API_HASHED_PASSWORD = config("API_HASHED_PASSWORD")
 DB_URL = config("DB_URL")
+DB_MAX_POOL_SIZE = config("DB_MAX_POOL_SIZE", cast=int, default=20)

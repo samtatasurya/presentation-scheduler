@@ -17,7 +17,7 @@ from piccolo.query import Max
 from passlib.context import CryptContext
 
 from schedule.tables import ScheduleTable, TABLE_NAME
-from settings import API_USER, API_HASHED_PASSWORD
+from settings import API_USER, API_HASHED_PASSWORD, DB_MAX_POOL_SIZE
 
 ###############################################################################
 # Schema
@@ -80,7 +80,7 @@ def get_password_hash(password: str) -> str:
 @app.on_event("startup")
 async def open_database_connection_pool():
     engine = engine_finder()
-    await engine.start_connnection_pool()
+    await engine.start_connnection_pool(max_size=DB_MAX_POOL_SIZE)
 
 
 @app.on_event("shutdown")
