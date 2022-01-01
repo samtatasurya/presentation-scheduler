@@ -7,23 +7,8 @@ steps:
     name: "gcr.io/cloud-builders/docker"
     args: ["push", "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}"]
 
-  - id: "apply migrations"
-    name: "gcr.io/google-appengine/exec-wrapper"
-    args: [
-      "-i",
-      "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}",
-      "-s",
-      "${PROJECT_ID}:${_REGION}:${_INSTANCE_NAME}",
-      "-e",
-      "SETTINGS_NAME=${_SECRET_SETTINGS_NAME}",
-      "--", "piccolo", "migrations", "forwards", "schedule"
-    ]
-
 images:
   - "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}"
 
 substitutions:
-  _INSTANCE_NAME: personal-project
-  _REGION: us-west1
-  _SECRET_SETTINGS_NAME: fastapi_settings
   _SERVICE_NAME: schedule-service

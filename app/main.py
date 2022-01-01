@@ -10,14 +10,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from asyncpg.exceptions import PostgresError
-from piccolo.engine import engine_finder
-from piccolo.query import Max
+from google.api_core import datetime_helpers as dh
+from google.cloud import firestore
 
 from passlib.context import CryptContext
 
-from schedule.tables import ScheduleTable, TABLE_NAME
-from settings import API_USER, API_HASHED_PASSWORD, DB_MAX_POOL_SIZE
+from settings import API_USER, API_HASHED_PASSWORD, DB_COLLECTION
 
 ###############################################################################
 # Schema
@@ -60,9 +58,9 @@ templates.env.filters["date_format"] = date_format
 # Helper functions
 ###############################################################################
 
-def user_id_parse(user_id_str: str) -> int:
-    """ Convert frontend user ID to DB-compatible ID. """
-    return int(user_id_str.split("-")[1])
+def user_id_parse(user_id_str: str) -> str:
+    """ Convert frontend user ID to Firestore-compatible ID. """
+    return user_id_str.split("-")[1]
 
 
 def date_parse(date_str: str) -> date:
@@ -70,23 +68,26 @@ def date_parse(date_str: str) -> date:
     return datetime.strptime(date_str, "%m/%d/%Y").date()
 
 
+def date_to_firestore_timestamp(date_obj: date) -> dh.DatetimeWithNanoseconds:
+    """ Convert datetime.date object to Firestore-compatible timestamp. """
+    datetime_obj = datetime.combine(date_obj, datetime.min.time())
+    rfc3339_str = dh.to_rfc3339(datetime_obj)
+    return dh.DatetimeWithNanoseconds.from_rfc3339(rfc3339_str)
+
+
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
-###############################################################################
-# Event handlers
-###############################################################################
 
-@app.on_event("startup")
-async def open_database_connection_pool():
-    engine = engine_finder()
-    await engine.start_connnection_pool(max_size=DB_MAX_POOL_SIZE)
-
-
-@app.on_event("shutdown")
-async def close_database_connection_pool():
-    engine = engine_finder()
-    await engine.close_connnection_pool()
+def get_async_client():
+    """ Get an async client for interacting with Google Cloud Firestore. """
+    if os.environ.get("GOOGLE_CLOUD_PROJECT", None) is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to establish database connection.",
+        )
+    project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    return firestore.AsyncClient(project=project_id)
 
 ###############################################################################
 # Dependencies
@@ -124,10 +125,12 @@ async def get_schedule():
         "users": [],
         "dates": [],
     }
-    all_sched = await ScheduleTable.select().order_by(ScheduleTable.date).run()
-    for sched in all_sched:
-        formatted_sched["users"].append({"id": sched["id"], "name": sched["name"]})
-        formatted_sched["dates"].append(sched["date"])
+    db = get_async_client()
+    query = db.collection(DB_COLLECTION).order_by("datetime")
+    async for res in query.stream():
+        sched = res.to_dict()
+        formatted_sched["users"].append({"id": res.id, "name": sched["name"]})
+        formatted_sched["dates"].append(sched["datetime"].date())
     return formatted_sched
 
 
@@ -144,11 +147,15 @@ async def update_schedule(sched: Schedule):
         users = [user_id_parse(u) for u in sched.users]
         dates = [date_parse(d) for d in sched.dates]
         # Atomic (all-or-nothing) updates
-        async with ScheduleTable._meta.db.transaction():
-            for idx in range(len(users)):
-                await ScheduleTable.update({
-                        ScheduleTable.date: dates[idx]
-                    }).where(ScheduleTable.id == users[idx]).run()
+        db = get_async_client()
+        count = 0
+        batch = db.batch()
+        for idx in range(len(users)):
+            sched_ref = db.collection(DB_COLLECTION).document(users[idx])
+            batch.update(sched_ref, {"datetime": date_to_firestore_timestamp(dates[idx])})
+            count += 1
+        if count > 0:
+            await batch.commit()
     return {"count": len(sched.users)}
 
 
@@ -156,25 +163,28 @@ async def update_schedule(sched: Schedule):
          dependencies=[Depends(verify_credentials)])
 async def rotate_schedule():
     """ Rotate dates that are older than current date. """
-    old_schedules = await ScheduleTable.select(
-        ScheduleTable.id, ScheduleTable.date).where(
-        ScheduleTable.date < date.today()).order_by(
-        ScheduleTable.date).run()
-    if old_schedules is None:
-        return {"count": 0}
-
-    resp = await ScheduleTable.select(
-        Max(ScheduleTable.date)).first().run()
-    ref_date = resp["max"]
+    db = get_async_client()
+    # Get maximum
+    ref_date = None
+    query = db.collection(DB_COLLECTION).order_by("datetime", direction=firestore.Query.DESCENDING).limit(1)
+    async for res in query.stream():
+        sched = res.to_dict()
+        ref_date = sched["datetime"].date()
 
     # Atomic (all-or-nothing) updates
-    async with ScheduleTable._meta.db.transaction():
-        for sched in old_schedules:
-            ref_date += timedelta(days=7)
-            await ScheduleTable.update({
-                    ScheduleTable.date: ref_date
-                }).where(ScheduleTable.id == sched["id"]).run()
-    return {"count": len(old_schedules)}
+    today_ts = date_to_firestore_timestamp(date.today())
+    query = db.collection(DB_COLLECTION).where("datetime", "<", today_ts).order_by("datetime")
+    count = 0
+    batch = db.batch()
+    async for res in query.stream():
+        ref_date += timedelta(days=7)
+        sched_ref = db.collection(DB_COLLECTION).document(res.id)
+        batch.update(sched_ref, {"datetime": date_to_firestore_timestamp(ref_date)})
+        count += 1
+    if count > 0:
+        await batch.commit()
+
+    return {"count": count}
 
 
 @app.post("/users", status_code=status.HTTP_201_CREATED,
@@ -186,49 +196,64 @@ async def create_user(new_user: NewUser):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User's name is empty.",
         )
-    resp = await ScheduleTable.select(
-        Max(ScheduleTable.date)).first().run()
-    max_date = resp["max"]
-    if not max_date:
+
+    db = get_async_client()
+    # Get maximum
+    max_date = None
+    query = db.collection(DB_COLLECTION).order_by("datetime", direction=firestore.Query.DESCENDING).limit(1)
+    async for res in query.stream():
+        sched = res.to_dict()
+        max_date = sched["datetime"].date()
+
+    if max_date is None:
         new_date = date.today()
     else:
         new_date = max_date + timedelta(days=7)
+
     try:
-        result = await ScheduleTable.insert(
-            ScheduleTable(name=new_user.name, date=new_date)).run()
-        result = result[0]
-    except PostgresError:
+        new_sched_ref = db.collection(DB_COLLECTION).document()
+        await new_sched_ref.set({
+            "name": new_user.name,
+            "datetime": date_to_firestore_timestamp(new_date),
+        })
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create a new user.",
         )
-    return result
+    return {"id": new_sched_ref.id}
 
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_202_ACCEPTED,
             dependencies=[Depends(verify_credentials)])
-async def delete_user(user_id: int):
-    resp = await ScheduleTable.select().where(ScheduleTable.id == user_id).first().run()
-    if resp is None:
+async def delete_user(user_id: str):
+    """ Remove an existing user. """
+    db = get_async_client()
+    target_ref = db.collection(DB_COLLECTION).document(user_id)
+    doc = await target_ref.get()
+    if not doc.exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User with the given ID not found.",
         )
-    """ Remove an existing user. """
+
+    target_id = doc.id
+    target = doc.to_dict()
+    prev_date = target["datetime"].date()
+    prev_date_ts = date_to_firestore_timestamp(prev_date)
+
     # Atomic (all-or-nothing) update dates and delete the specified user
-    async with ScheduleTable._meta.db.transaction():
-        # Update dates of other users whose dates come after the user to be deleted
-        await ScheduleTable.raw("CREATE VIEW view_schedules AS SELECT * FROM " + TABLE_NAME + " ORDER BY date ASC").run()
-        await ScheduleTable.raw("CREATE RULE rule_schedules AS ON UPDATE TO view_schedules DO INSTEAD UPDATE " + TABLE_NAME +
-                                "  SET date = NEW.date WHERE id = NEW.id").run()
-        await ScheduleTable.raw("UPDATE view_schedules AS uold SET date = unew.new_date"
-                                "  FROM ("
-                                "    SELECT id, LAG(date) OVER (ORDER BY date ASC) AS new_date"
-                                "    FROM view_schedules"
-                                "  ) unew"
-                                "  WHERE uold.id = unew.id AND date > {}", resp["date"]).run()
-        await ScheduleTable.raw("DROP RULE rule_schedules ON view_schedules").run()
-        await ScheduleTable.raw("DROP VIEW view_schedules").run()
-        # Delete the specified user
-        await ScheduleTable.delete().where(ScheduleTable.name == resp["name"]).run()
-    return {"id": resp["id"]}
+    query = db.collection(DB_COLLECTION).where("datetime", ">", prev_date_ts).order_by("datetime")
+    batch = db.batch()
+    # Update dates of other users whose dates come after the user to be deleted
+    async for res in query.stream():
+        sched = res.to_dict()
+        tmp_date = sched["datetime"].date()
+        sched_ref = db.collection(DB_COLLECTION).document(res.id)
+        batch.update(sched_ref, {"datetime": date_to_firestore_timestamp(prev_date)})
+        prev_date = tmp_date
+    # Delete the specified user
+    batch.delete(target_ref)
+    await batch.commit()
+
+    return {"id": target_id}
