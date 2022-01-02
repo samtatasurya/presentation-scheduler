@@ -1,11 +1,13 @@
 # Google Cloud Deployment
 
 The following guide is for the deployment of this application on Google Cloud.
-It follows the [Django on Cloud Run](https://cloud.google.com/python/django/run), with modifications explained below.
+It follows the following guides, with modifications explained below:
+- [Django on Cloud Run](https://cloud.google.com/python/django/run)
+- [Using Firestore server client library](https://cloud.google.com/firestore/docs/quickstart-servers)
 
 ## Services Used
 
-1. Cloud SQL
+1. Cloud Firestore
 2. Secret Manager
 3. Cloud Build
 4. Container Registry
@@ -14,32 +16,22 @@ It follows the [Django on Cloud Run](https://cloud.google.com/python/django/run)
 
 ## Modifications
 
-1. We skip the section [Set up a Cloud Storage bucket](https://cloud.google.com/python/django/run#set-up-a-cloud-storage-bucket) since we do not have any static files.
-2. While for local development we store the values below in a ".env" file, for cloud deployment we store these values using Secret Manager. _Pay particular attention to the format of `database_url`_.
+1. In [Django on Cloud Run](https://cloud.google.com/python/django/run) guide, we skip the sections related to Cloud SQL (since we use Firestore) and Cloud Storage (since we do not have any static files).
+2. While for local development we store the values below in a ".env" file, for cloud deployment we store these values using Secret Manager.
 ```
 API_USER=<plain_username>
 API_HASHED_PASSWORD=<hashed_password>
-DB_URL=<database_url>
-DB_MAX_POOL_SIZE=<max_size>
+DB_COLLECTION=<collection_name>
 ```
 - `plain_username`
   - Username (plain string) to be used in accessing some API routes.
 - `hashed_password`
   - Password (hashed) to be used in accessing some API routes.
-- `database_url`
-  - Database URL. For PostgreSQL instance on Cloud SQL, it is in the following format:
-```
-postgres:///<DB_NAME>?host=/cloudsql/<PROJECT_ID>:<REGION>:<INSTANCE_NAME>/.s.PGSQL.5432&user=<DB_USER>&password=<DB_PASS>
-```
-- `max_size`
-  - Maximum number of database connections in the pool.
-  - Cloud SQL has [limits](https://cloud.google.com/sql/docs/postgres/quotas#fixed-limits) depending on the machine type.
+- `collection_name`
+  - Firestore collection name created in the previous step to store documents.
 3. In `cloudbuild.yaml`, modify the "substitutions" values to match your own values.
 ```
 substitutions:
-  _INSTANCE_NAME: <cloudsql-instance-name>
-  _REGION: <your-target-region>
-  _SECRET_SETTINGS_NAME: <secret-name-in-secret-manager>
   _SERVICE_NAME: <your-service-name>
 ```
 
@@ -59,7 +51,6 @@ gcloud run deploy <SERVICE_NAME> \
     --platform managed \
     --region <REGION> \
     --image gcr.io/<PROJECT_ID>/<SERVICE_NAME> \
-    --add-cloudsql-instances <PROJECT_ID>:<REGION>:<INSTANCE_NAME> \
     --allow-unauthenticated
 ```
 
